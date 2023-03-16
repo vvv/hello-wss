@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -eu -o pipefail
+# shopt -s inherit_errexit
+# set -x
+export PS4='+ [${BASH_SOURCE[0]##*/}:${LINENO}${FUNCNAME[0]:+:${FUNCNAME[0]}}] '
+
+# A PKCS #12 file, that bundles a private key with its X.509 certificate.
+# The certificate, in turn, contains an identity (a hostname) and a public key.
+#
+# This file MUST NOT be shared outside of this organization.
+#
+# See also https://stackoverflow.com/a/22788593/136238
+IDENTITY=identity.p12 # SECRET data
+PASSPHRASE='mypass'   # SECRET value
+
+CERT=_cert.pem
+KEY=_key.pem
+
+# Generate certificate and private key.
+# XXX-HACK: `-nodes` ("no DES") --- don't protect the private key with passphrase
+openssl req -new -x509 -newkey rsa:4096 -sha256 \
+    -days 365 \
+    -keyout $KEY -nodes \
+    -out $CERT \
+    -extensions san -config <(
+        cat <<'EOF'
+[req]
+distinguished_name = req
+
+[san]
+subjectAltName = DNS:localhost, IP:127.0.0.1
+EOF
+    ) \
+    -subj '/CN=localhost'
+
+# Merge certificate and private key into a PKCS#12 file.
+openssl pkcs12 \
+    -export \
+    -inkey $KEY \
+    -in $CERT \
+    -out $IDENTITY \
+    -passout pass:$PASSPHRASE
+
+rm $CERT $KEY

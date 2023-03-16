@@ -1,28 +1,12 @@
-use std::{fs::File, io::BufReader, net::SocketAddr, path::Path, sync::Arc};
+use std::net::SocketAddr;
 
-use color_eyre::eyre::{self, WrapErr};
+use color_eyre::eyre;
+use obfstr::obfstr;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpListener,
 };
-use tokio_rustls::{rustls, TlsAcceptor};
 use tracing::instrument;
-
-fn open_file<P: AsRef<Path>>(path: P) -> eyre::Result<BufReader<File>> {
-    let path = path.as_ref();
-    let f = File::open(path).wrap_err_with(|| format!("path {}", path.display()))?;
-    Ok(BufReader::new(f))
-}
-
-fn load_certs<P: AsRef<Path>>(path: P) -> eyre::Result<Vec<rustls::Certificate>> {
-    let bufs = rustls_pemfile::certs(&mut open_file(path)?)?;
-    Ok(bufs.into_iter().map(rustls::Certificate).collect())
-}
-
-fn load_keys<P: AsRef<Path>>(path: P) -> eyre::Result<Vec<rustls::PrivateKey>> {
-    let bufs = rustls_pemfile::pkcs8_private_keys(&mut open_file(path)?)?;
-    Ok(bufs.into_iter().map(rustls::PrivateKey).collect())
-}
 
 #[instrument(skip_all, fields(%addr))]
 async fn handle_connection<S>(stream: S, addr: SocketAddr) -> eyre::Result<()>
@@ -40,23 +24,11 @@ async fn main() -> eyre::Result<()> {
     color_eyre::install()?;
     tracing_init();
 
-    let certs = load_certs(concat!(env!("CARGO_MANIFEST_DIR"), "/test.cer"))?;
-    assert_eq!(certs.len(), 1);
-
-    let mut keys = load_keys(concat!(env!("CARGO_MANIFEST_DIR"), "/test.key"))?;
-    assert_eq!(keys.len(), 1);
-
-    let config = rustls::ServerConfig::builder()
-        .with_safe_defaults()
-        .with_no_client_auth()
-        // XXX-REVIEW: Note that the end-entity certificate must have the
-        // Subject Alternative Name extension to describe, e.g., the valid DNS
-        // name.
-        //
-        // See https://docs.rs/rustls/0.20.8/rustls/struct.ConfigBuilder.html#method.with_single_cert-2
-        .with_single_cert(certs, keys.remove(0))?;
-    let acceptor = TlsAcceptor::from(Arc::new(config));
-
+    let acceptor = {
+        let p12 = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/identity.p12"));
+        let identity = native_tls::Identity::from_pkcs12(p12, obfstr!("mypass"))?;
+        tokio_native_tls::TlsAcceptor::from(native_tls::TlsAcceptor::new(identity)?)
+    };
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let local_addr = listener.local_addr()?;
 
