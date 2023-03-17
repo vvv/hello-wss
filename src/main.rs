@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use color_eyre::eyre;
+use color_eyre::eyre::{self, WrapErr};
 use obfstr::obfstr;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -14,7 +14,9 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     tracing::info!("Incoming TCP connection");
-    let _ws_stream = tokio_tungstenite::accept_async(stream).await?;
+    let _ws_stream = tokio_tungstenite::accept_async(stream)
+        .await
+        .wrap_err("accept_async failed")?;
     tracing::debug!("WebSocket connection established");
     Ok(())
 }
@@ -34,15 +36,36 @@ async fn main() -> eyre::Result<()> {
 
     let server = tokio::spawn(async move {
         while let Ok((tcp_stream, addr)) = listener.accept().await {
-            let tls_stream = acceptor.accept(tcp_stream).await?;
+            let tls_stream = acceptor
+                .accept(tcp_stream)
+                .await
+                .wrap_err("accept failed")?;
             tokio::spawn(handle_connection(tls_stream, addr));
         }
         Ok::<_, eyre::Report>(())
     });
 
+    let connector = {
+        let cert = native_tls::Certificate::from_pem(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/_cert.pem"
+        )))?;
+        let connector = native_tls::TlsConnector::builder()
+            .add_root_certificate(cert)
+            // .use_sni(false)
+            .build()?;
+        tokio_tungstenite::Connector::NativeTls(connector)
+    };
+
     let url = format!("wss://{local_addr}");
     let client = tokio::spawn(async move {
-        let (_ws_stream, _) = tokio_tungstenite::connect_async(url).await?;
+        // let (_ws_stream, _) = tokio_tungstenite::connect_async(url)
+        //     .await
+        //     .wrap_err("connect_async failed")?;
+        let (_ws_stream, _) =
+            tokio_tungstenite::connect_async_tls_with_config(url, None, Some(connector))
+                .await
+                .wrap_err("connect_async_tls_with_config failed")?;
         tracing::info!("✅ WebSocket connection established");
         Ok::<_, eyre::Report>(())
     });
