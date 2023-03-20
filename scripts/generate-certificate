@@ -41,5 +41,4 @@ openssl pkcs12 \
     -out $IDENTITY \
     -passout pass:$PASSPHRASE
 
-#rm $CERT $KEY
-rm $KEY
+rm $CERT $KEY

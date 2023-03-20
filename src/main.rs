@@ -27,12 +27,21 @@ async fn main() -> eyre::Result<()> {
     tracing_init();
 
     let acceptor = {
-        let p12 = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/identity.p12"));
+        let p12 = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            // HACK: Run `scripts/generate-certificate` to create this file.
+            "/identity.p12",
+        ));
         let identity = native_tls::Identity::from_pkcs12(p12, obfstr!("mypass"))?;
         tokio_native_tls::TlsAcceptor::from(native_tls::TlsAcceptor::new(identity)?)
     };
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
-    let local_addr = listener.local_addr()?;
+    #[cfg(feature = "connect")]
+    let port = 0;
+    #[cfg(not(feature = "connect"))]
+    let port = 8443;
+    let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await?;
+    #[cfg(feature = "connect")]
+    let url = format!("wss://{}", listener.local_addr()?);
 
     let server = tokio::spawn(async move {
         while let Ok((tcp_stream, addr)) = listener.accept().await {
@@ -45,31 +54,16 @@ async fn main() -> eyre::Result<()> {
         Ok::<_, eyre::Report>(())
     });
 
-    let connector = {
-        let cert = native_tls::Certificate::from_pem(include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/_cert.pem"
-        )))?;
-        let connector = native_tls::TlsConnector::builder()
-            .add_root_certificate(cert)
-            // .use_sni(false)
-            .build()?;
-        tokio_tungstenite::Connector::NativeTls(connector)
-    };
-
-    let url = format!("wss://{local_addr}");
+    #[cfg(feature = "connect")]
     let client = tokio::spawn(async move {
-        // let (_ws_stream, _) = tokio_tungstenite::connect_async(url)
-        //     .await
-        //     .wrap_err("connect_async failed")?;
-        let (_ws_stream, _) =
-            tokio_tungstenite::connect_async_tls_with_config(url, None, Some(connector))
-                .await
-                .wrap_err("connect_async_tls_with_config failed")?;
+        let (_ws_stream, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .wrap_err("connect_async failed")?;
         tracing::info!("✅ WebSocket connection established");
         Ok::<_, eyre::Report>(())
     });
 
+    #[cfg(feature = "connect")]
     client.await.unwrap()?;
     server.await.unwrap()?;
     Ok(())
