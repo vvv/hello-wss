@@ -13,7 +13,9 @@ export PS4='+ [${BASH_SOURCE[0]##*/}:${LINENO}${FUNCNAME[0]:+:${FUNCNAME[0]}}] '
 IDENTITY=identity.p12 # SECRET data
 PASSPHRASE='mypass'   # SECRET value
 
-CERT=_cert.pem
+CERT_NAME=hello-wss
+CERT=$CERT_NAME.pem
+
 KEY=_key.pem
 
 # Generate certificate and private key.
@@ -31,7 +33,7 @@ distinguished_name = req
 subjectAltName = DNS:localhost, IP:127.0.0.1
 EOF
     ) \
-    -subj '/CN=localhost'
+    -subj "/CN=$CERT_NAME"
 
 # Merge certificate and private key into a PKCS#12 file.
 openssl pkcs12 \
@@ -41,4 +43,18 @@ openssl pkcs12 \
     -out $IDENTITY \
     -passout pass:$PASSPHRASE
 
-rm $CERT $KEY
+rm $KEY
+
+if [[ $(uname) == 'Darwin' ]]; then
+    cat >&2 <<EOF
+
+Next steps
+----------
+
+- Open 'Keychain Access' app
+- Import the certificate file - $CERT - into 'login' keychain
+- Find this certificate --- search for "$CERT_NAME"
+- Right click, 'Get info' (or press 'Cmd-i')
+- Set Trust 'When using this certificate' to 'Always Trust'
+EOF
+fi

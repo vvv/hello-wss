@@ -65,6 +65,7 @@ async fn main() -> eyre::Result<()> {
 
     #[cfg(feature = "connect")]
     client.await.unwrap()?;
+
     server.await.unwrap()?;
     Ok(())
 }
