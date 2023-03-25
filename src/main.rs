@@ -1,6 +1,9 @@
-use std::net::SocketAddr;
+use std::{fs, net::SocketAddr, path::Path};
 
-use color_eyre::eyre::{self, WrapErr};
+use color_eyre::{
+    eyre::{self, WrapErr as _},
+    Section as _,
+};
 use obfstr::obfstr;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -27,12 +30,11 @@ async fn main() -> eyre::Result<()> {
     tracing_init();
 
     let acceptor = {
-        let p12 = include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            // HACK: Run `scripts/generate-certificate` to create this file.
-            "/identity.p12",
-        ));
-        let identity = native_tls::Identity::from_pkcs12(p12, obfstr!("mypass"))?;
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("identity.p12");
+        let p12 = fs::read(&path)
+            .wrap_err_with(|| format!("Cannot read {}", path.display()))
+            .suggestion("run 'scripts/generate-certificate' to create 'identity.p12'")?;
+        let identity = native_tls::Identity::from_pkcs12(&p12, obfstr!("mypass"))?;
         tokio_native_tls::TlsAcceptor::from(native_tls::TlsAcceptor::new(identity)?)
     };
     #[cfg(feature = "connect")]
